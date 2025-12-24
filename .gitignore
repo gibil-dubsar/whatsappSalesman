@@ -1,0 +1,14 @@
+node_modules/
+ui/node_modules/
+.DS_Store
+.idea/
+.ipynb_checkpoints/
+.wwebjs_auth/
+.wwebjs_cache/
+SelectedHouseImages/
+example_chats/
+seller_background.db
+seller_background_data.csv
+property_context.json
+tested_numbers.txt
+log.txt
