@@ -364,6 +364,7 @@ export function registerContactRoutes(app, { initialMessage }) {
 
         const limit = parsePositiveInt(req.query.limit);
         const fromMe = parseBoolean(req.query.fromMe);
+        const clean = parseBoolean(req.query.clean);
         const options = {};
         if (limit) {
             options.limit = limit;
@@ -393,6 +394,30 @@ export function registerContactRoutes(app, { initialMessage }) {
             }
 
             const messages = await chat.fetchMessages(options);
+            if (clean) {
+                const chatlog = Array.isArray(messages)
+                    ? messages
+                          .map((message) => {
+                              if (!message || typeof message !== 'object') return null;
+                              const rawBody = typeof message.body === 'string' ? message.body : '';
+                              const body = rawBody.trim();
+                              if (!body) {
+                                  if (message.hasMedia) {
+                                      const mediaType = message.type ? String(message.type) : 'media';
+                                      const label = `media:${mediaType}`;
+                                      return message.fromMe ? `me: [${label}]` : `them: [${label}]`;
+                                  }
+                                  return null;
+                              }
+                              return message.fromMe ? `me: ${body}` : `them: ${body}`;
+                          })
+                          .filter(Boolean)
+                          .join('\n')
+                    : '';
+                res.json({ chatlog });
+                return;
+            }
+
             const payload = Array.isArray(messages)
                 ? messages.map(serializeMessage).filter(Boolean)
                 : [];

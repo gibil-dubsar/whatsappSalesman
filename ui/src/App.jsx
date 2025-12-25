@@ -119,6 +119,15 @@ function App() {
     }
   }
 
+  async function syncHistory(rowid) {
+    try {
+      await fetchJson(`/api/contacts/${rowid}/sync-history`, { method: 'POST' })
+      showToast('History sync started.')
+    } catch (err) {
+      showToast(err.message, 'error')
+    }
+  }
+
   async function deleteContact(rowid) {
     const confirmed = window.confirm('Delete this contact?')
     if (!confirmed) return
@@ -309,6 +318,9 @@ function App() {
                       <p className="text-base font-semibold text-gray-900">
                         {contact.contactName || contact.agentName || 'Unknown contact'}
                       </p>
+                      <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        Row ID: {contact.rowid}
+                      </p>
                       {metaParts.length > 0 && (
                         <p className="mt-1 text-sm text-gray-600">{metaParts.join(' / ')}</p>
                       )}
@@ -339,6 +351,13 @@ function App() {
                           : initiatingId === contact.rowid
                           ? 'Sending...'
                           : 'Initiate'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => syncHistory(contact.rowid)}
+                        className="rounded-full border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:border-gray-300"
+                      >
+                        Sync history
                       </button>
                       <button
                         type="button"
