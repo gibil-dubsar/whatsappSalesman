@@ -296,10 +296,8 @@ function App() {
                 const status = statusLabel(contact.conversation_started)
                 const metaParts = [
                   contact.agentName && contact.agentName !== contact.contactName
-                    ? contact.agentName
+                    ? `Agent: ${contact.agentName}`
                     : null,
-                  contact.propertyType,
-                  contact.city,
                 ].filter(Boolean)
 
                 return (
@@ -372,7 +370,7 @@ function App() {
           <form ref={formRef} onSubmit={handleSubmit} className="mt-6">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
               {schema.map((column) => {
-                const isTextarea = column.name === 'heading'
+                const isTextarea = column.name === 'notes'
                 return (
                   <label key={column.name} className="flex flex-col gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
                     {column.name}

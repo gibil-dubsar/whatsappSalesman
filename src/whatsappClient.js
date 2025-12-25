@@ -233,3 +233,10 @@ export async function sendMessage(chatId, message) {
     await sleep(500);
     return client.sendMessage(chatId, message);
 }
+
+export async function getChatById(chatId) {
+    if (!client) {
+        throw new Error('WhatsApp client not initialized.');
+    }
+    return client.getChatById(chatId);
+}

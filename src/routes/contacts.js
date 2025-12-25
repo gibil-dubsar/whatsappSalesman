@@ -8,6 +8,7 @@ import {
     getStatusUpdatedAt,
     getStoreReady,
     isClientReady,
+    getChatById,
     isRegisteredUser,
     sendMessage
 } from '../whatsappClient.js';
@@ -18,6 +19,65 @@ function parseRowId(value) {
         return null;
     }
     return rowId;
+}
+
+function parsePositiveInt(value) {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return null;
+    }
+    return parsed;
+}
+
+function parseBoolean(value) {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+    const normalized = String(value).toLowerCase();
+    if (['true', '1', 'yes', 'y'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'n'].includes(normalized)) return false;
+    return null;
+}
+
+function toChatId(contactNumber) {
+    const trimmed = (contactNumber || '').trim();
+    if (!trimmed) {
+        return null;
+    }
+    const sanitizedNumber = trimmed.replace(/[^\d]/g, '');
+    if (!sanitizedNumber) {
+        return null;
+    }
+    return `${sanitizedNumber}@c.us`;
+}
+
+async function loadContactForChat(db, rowId) {
+    return dbGet(
+        db,
+        `SELECT rowid, cleanContactNumber, conversation_started
+         FROM "${TABLE_NAME}"
+         WHERE rowid = ?`,
+        [rowId]
+    );
+}
+
+function serializeMessage(message) {
+    if (!message || typeof message !== 'object') {
+        return null;
+    }
+    return {
+        id: message.id && (message.id._serialized || message.id.id || message.id),
+        body: message.body,
+        from: message.from,
+        to: message.to,
+        fromMe: message.fromMe,
+        timestamp: message.timestamp,
+        type: message.type,
+        hasMedia: message.hasMedia,
+    };
 }
 
 async function updateStatus(db, rowId, status) {
@@ -31,7 +91,7 @@ async function updateStatus(db, rowId, status) {
 async function loadContacts(db) {
     return dbAll(
         db,
-        `SELECT rowid, adId, agentName, contactName, cleanContactNumber, city, propertyType, conversation_started
+        `SELECT rowid, contactName, agentName, cleanContactNumber, notes, conversation_started
          FROM "${TABLE_NAME}"
          ORDER BY rowid DESC`
     );
@@ -204,13 +264,7 @@ export function registerContactRoutes(app, { initialMessage }) {
 
         const db = openDatabase();
         try {
-            const row = await dbGet(
-                db,
-                `SELECT rowid, cleanContactNumber, conversation_started
-                 FROM "${TABLE_NAME}"
-                 WHERE rowid = ?`,
-                [rowId]
-            );
+            const row = await loadContactForChat(db, rowId);
             console.log(row);
 
             if (!row) {
@@ -218,19 +272,11 @@ export function registerContactRoutes(app, { initialMessage }) {
                 return;
             }
 
-            const contactNumber = (row.cleanContactNumber || '').trim();
-            if (!contactNumber) {
+            const chatId = toChatId(row.cleanContactNumber);
+            if (!chatId) {
                 res.status(400).json({ error: 'Contact missing cleanContactNumber.' });
                 return;
             }
-
-            const sanitizedNumber = contactNumber.replace(/[^\d]/g, '');
-            if (!sanitizedNumber) {
-                res.status(400).json({ error: 'Contact number is invalid.' });
-                return;
-            }
-
-            const chatId = `${sanitizedNumber}@c.us`;
             const isRegistered = await isRegisteredUser(chatId);
             console.log(`isRegisteredUser(${chatId}) = ${isRegistered}`);
             if (!isRegistered) {
@@ -249,6 +295,111 @@ export function registerContactRoutes(app, { initialMessage }) {
         } catch (err) {
             console.error('Failed to initiate conversation:', err);
             res.status(500).json({ error: 'Failed to initiate conversation.' });
+        } finally {
+            try {
+                await closeDatabase(db);
+            } catch (err) {
+                console.error('Failed to close database:', err);
+            }
+        }
+    });
+
+    app.post('/api/contacts/:rowid/sync-history', async (req, res) => {
+        if (!isClientReady()) {
+            res.status(503).json({ error: 'WhatsApp client not ready. Scan the QR code in the terminal.' });
+            return;
+        }
+
+        const rowId = parseRowId(req.params.rowid);
+        if (!rowId) {
+            res.status(400).json({ error: 'Invalid contact id.' });
+            return;
+        }
+
+        const db = openDatabase();
+        try {
+            const row = await loadContactForChat(db, rowId);
+            if (!row) {
+                res.status(404).json({ error: 'Contact not found.' });
+                return;
+            }
+
+            const chatId = toChatId(row.cleanContactNumber);
+            if (!chatId) {
+                res.status(400).json({ error: 'Contact missing cleanContactNumber.' });
+                return;
+            }
+
+            const chat = await getChatById(chatId);
+            if (!chat) {
+                res.status(404).json({ error: 'Chat not found.' });
+                return;
+            }
+
+            await chat.syncHistory();
+            res.json({ synced: true });
+        } catch (err) {
+            console.error('Failed to sync history:', err);
+            res.status(500).json({ error: 'Failed to sync history.' });
+        } finally {
+            try {
+                await closeDatabase(db);
+            } catch (err) {
+                console.error('Failed to close database:', err);
+            }
+        }
+    });
+
+    app.get('/api/contacts/:rowid/messages', async (req, res) => {
+        if (!isClientReady()) {
+            res.status(503).json({ error: 'WhatsApp client not ready. Scan the QR code in the terminal.' });
+            return;
+        }
+
+        const rowId = parseRowId(req.params.rowid);
+        if (!rowId) {
+            res.status(400).json({ error: 'Invalid contact id.' });
+            return;
+        }
+
+        const limit = parsePositiveInt(req.query.limit);
+        const fromMe = parseBoolean(req.query.fromMe);
+        const options = {};
+        if (limit) {
+            options.limit = limit;
+        }
+        if (fromMe !== null) {
+            options.fromMe = fromMe;
+        }
+
+        const db = openDatabase();
+        try {
+            const row = await loadContactForChat(db, rowId);
+            if (!row) {
+                res.status(404).json({ error: 'Contact not found.' });
+                return;
+            }
+
+            const chatId = toChatId(row.cleanContactNumber);
+            if (!chatId) {
+                res.status(400).json({ error: 'Contact missing cleanContactNumber.' });
+                return;
+            }
+
+            const chat = await getChatById(chatId);
+            if (!chat) {
+                res.status(404).json({ error: 'Chat not found.' });
+                return;
+            }
+
+            const messages = await chat.fetchMessages(options);
+            const payload = Array.isArray(messages)
+                ? messages.map(serializeMessage).filter(Boolean)
+                : [];
+            res.json({ messages: payload });
+        } catch (err) {
+            console.error('Failed to fetch messages:', err);
+            res.status(500).json({ error: 'Failed to fetch messages.' });
         } finally {
             try {
                 await closeDatabase(db);
