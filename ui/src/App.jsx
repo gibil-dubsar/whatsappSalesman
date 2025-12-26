@@ -4,12 +4,17 @@ import { QRCodeCanvas } from 'qrcode.react'
 const API_BASE = import.meta.env.VITE_API_BASE || ''
 const STATUS_STYLES = {
   pending: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200',
-  started: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200',
+  active: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200',
+  paused: 'bg-orange-50 text-orange-700 ring-1 ring-orange-200',
   unregistered: 'bg-rose-50 text-rose-700 ring-1 ring-rose-200',
   unknown: 'bg-gray-100 text-gray-700 ring-1 ring-gray-200',
 }
 
-const statusLabel = (value) => (value ? value : 'unknown')
+const normalizeStatus = (value) => {
+  if (!value) return 'unknown'
+  if (value === 'started') return 'active'
+  return value
+}
 
 async function fetchJson(path, options = {}) {
   const res = await fetch(`${API_BASE}${path}`, options)
@@ -25,6 +30,7 @@ function App() {
   const [schema, setSchema] = useState([])
   const [loading, setLoading] = useState(false)
   const [initiatingId, setInitiatingId] = useState(null)
+  const [statusUpdatingId, setStatusUpdatingId] = useState(null)
   const [toast, setToast] = useState(null)
   const formRef = useRef(null)
   const [activeTab, setActiveTab] = useState('contacts')
@@ -43,10 +49,11 @@ function App() {
 
   const stats = useMemo(() => {
     const total = contacts.length
-    const pending = contacts.filter((c) => c.conversation_started === 'pending').length
-    const started = contacts.filter((c) => c.conversation_started === 'started').length
-    const unregistered = contacts.filter((c) => c.conversation_started === 'unregistered').length
-    return { total, pending, started, unregistered }
+    const pending = contacts.filter((c) => normalizeStatus(c.conversation_started) === 'pending').length
+    const active = contacts.filter((c) => normalizeStatus(c.conversation_started) === 'active').length
+    const paused = contacts.filter((c) => normalizeStatus(c.conversation_started) === 'paused').length
+    const unregistered = contacts.filter((c) => normalizeStatus(c.conversation_started) === 'unregistered').length
+    return { total, pending, active, paused, unregistered }
   }, [contacts])
 
   async function loadContacts() {
@@ -141,6 +148,23 @@ function App() {
     }
   }
 
+  async function setContactStatus(rowid, status) {
+    setStatusUpdatingId(rowid)
+    try {
+      await fetchJson(`/api/contacts/${rowid}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      })
+      showToast(`Status set to ${status}.`)
+      loadContacts()
+    } catch (err) {
+      showToast(err.message, 'error')
+    } finally {
+      setStatusUpdatingId(null)
+    }
+  }
+
   async function handleSubmit(event) {
     event.preventDefault()
     const payload = {}
@@ -218,11 +242,12 @@ function App() {
               </div>
             )}
           </div>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
             {[
               { label: 'Total', value: stats.total },
               { label: 'Pending', value: stats.pending },
-              { label: 'Started', value: stats.started },
+              { label: 'Active', value: stats.active },
+              { label: 'Paused', value: stats.paused },
               { label: 'Unregistered', value: stats.unregistered },
             ].map((stat) => (
               <div key={stat.label} className="rounded-xl border border-gray-200 bg-white p-4">
@@ -302,7 +327,7 @@ function App() {
             )}
             {!loading &&
               contacts.map((contact) => {
-                const status = statusLabel(contact.conversation_started)
+                const status = normalizeStatus(contact.conversation_started)
                 const metaParts = [
                   contact.agentName && contact.agentName !== contact.contactName
                     ? `Agent: ${contact.agentName}`
@@ -338,20 +363,43 @@ function App() {
                         type="button"
                         onClick={() => initiateContact(contact.rowid)}
                         disabled={
-                          status === 'started' ||
+                          status === 'active' ||
+                          status === 'paused' ||
                           status === 'unregistered' ||
                           initiatingId === contact.rowid
                         }
                         className="rounded-full bg-gray-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300"
                       >
-                        {status === 'started'
-                          ? 'Sent'
+                        {status === 'active'
+                          ? 'Active'
+                          : status === 'paused'
+                          ? 'Paused'
                           : status === 'unregistered'
                           ? 'Unregistered'
                           : initiatingId === contact.rowid
                           ? 'Sending...'
                           : 'Initiate'}
                       </button>
+                      {status !== 'active' && status !== 'unregistered' && (
+                        <button
+                          type="button"
+                          onClick={() => setContactStatus(contact.rowid, 'active')}
+                          disabled={statusUpdatingId === contact.rowid}
+                          className="rounded-full border border-emerald-200 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Set active
+                        </button>
+                      )}
+                      {status === 'active' && (
+                        <button
+                          type="button"
+                          onClick={() => setContactStatus(contact.rowid, 'paused')}
+                          disabled={statusUpdatingId === contact.rowid}
+                          className="rounded-full border border-orange-200 px-4 py-2 text-sm font-semibold text-orange-700 transition hover:border-orange-300 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Pause
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => syncHistory(contact.rowid)}

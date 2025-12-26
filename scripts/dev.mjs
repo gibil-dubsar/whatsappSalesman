@@ -22,7 +22,7 @@ function run(command, args, label) {
   return child;
 }
 
-const server = run('node', ['whatsAppContactProcess.js'], 'server');
+const server = run('node', ['scripts/start-server.mjs'], 'server');
 const ui = run('npm', ['run', 'dev', '--prefix', 'ui'], 'ui');
 
 function shutdown(signal) {

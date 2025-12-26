@@ -2,7 +2,7 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "dev:server": "node whatsAppContactProcess.js",
+    "dev:server": "node scripts/start-server.mjs",
     "dev:ui": "npm run dev --prefix ui",
     "install:ui": "npm install --prefix ui"
   },

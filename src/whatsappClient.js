@@ -13,6 +13,7 @@ let statusUpdatedAt = Date.now();
 let connectionState = 'unknown';
 let keepAliveTimer = null;
 let pollTimer = null;
+let messageHandler = null;
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 function updateStatus(nextStatus, detail = '') {
@@ -150,6 +151,11 @@ export function initWhatsAppClient() {
         const body = typeof msg.body === 'string' ? msg.body : '';
         const snippet = body.length > 120 ? `${body.slice(0, 120)}...` : body;
         console.log('MESSAGE RECEIVED', msg.from, snippet);
+        if (messageHandler) {
+            Promise.resolve(messageHandler(msg)).catch((err) => {
+                console.error('Message handler failed:', err);
+            });
+        }
     });
 
     if (WHATSAPP_KEEP_ALIVE_MS > 0) {
@@ -197,6 +203,10 @@ export function isClientReady() {
 
 export function getLatestQr() {
     return latestQr;
+}
+
+export function setMessageHandler(handler) {
+    messageHandler = handler;
 }
 
 export function getStatus() {

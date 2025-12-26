@@ -29,6 +29,7 @@ export const WHATSAPP_STATE_POLL_MS = Number.parseInt(
 
 export const STATUS = {
     PENDING: 'pending',
-    STARTED: 'started',
+    ACTIVE: 'active',
+    PAUSED: 'paused',
     UNREGISTERED: 'unregistered',
 };

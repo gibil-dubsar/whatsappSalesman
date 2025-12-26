@@ -12,3 +12,4 @@ seller_background_data.csv
 property_context.json
 tested_numbers.txt
 log.txt
+.env

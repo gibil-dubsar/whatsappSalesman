@@ -290,11 +290,46 @@ export function registerContactRoutes(app, { initialMessage }) {
                 return;
             }
             await sendMessage(chatId, initialMessage);
-            await updateStatus(db, rowId, STATUS.STARTED);
-            res.json({ status: STATUS.STARTED });
+            await updateStatus(db, rowId, STATUS.ACTIVE);
+            res.json({ status: STATUS.ACTIVE });
         } catch (err) {
             console.error('Failed to initiate conversation:', err);
             res.status(500).json({ error: 'Failed to initiate conversation.' });
+        } finally {
+            try {
+                await closeDatabase(db);
+            } catch (err) {
+                console.error('Failed to close database:', err);
+            }
+        }
+    });
+
+    app.patch('/api/contacts/:rowid/status', async (req, res) => {
+        const rowId = parseRowId(req.params.rowid);
+        if (!rowId) {
+            res.status(400).json({ error: 'Invalid contact id.' });
+            return;
+        }
+
+        const nextStatus = req.body?.status;
+        const allowedStatuses = new Set(Object.values(STATUS));
+        if (!allowedStatuses.has(nextStatus)) {
+            res.status(400).json({ error: 'Invalid status.' });
+            return;
+        }
+
+        const db = openDatabase();
+        try {
+            const row = await loadContactForChat(db, rowId);
+            if (!row) {
+                res.status(404).json({ error: 'Contact not found.' });
+                return;
+            }
+            await updateStatus(db, rowId, nextStatus);
+            res.json({ status: nextStatus });
+        } catch (err) {
+            console.error('Failed to update status:', err);
+            res.status(500).json({ error: 'Failed to update status.' });
         } finally {
             try {
                 await closeDatabase(db);
