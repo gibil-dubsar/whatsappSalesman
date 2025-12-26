@@ -9,6 +9,7 @@ import {
     getStoreReady,
     isClientReady,
     getChatById,
+    fetchChatMessages,
     isRegisteredUser,
     sendMessage
 } from '../whatsappClient.js';
@@ -62,22 +63,6 @@ async function loadContactForChat(db, rowId) {
          WHERE rowid = ?`,
         [rowId]
     );
-}
-
-function serializeMessage(message) {
-    if (!message || typeof message !== 'object') {
-        return null;
-    }
-    return {
-        id: message.id && (message.id._serialized || message.id.id || message.id),
-        body: message.body,
-        from: message.from,
-        to: message.to,
-        fromMe: message.fromMe,
-        timestamp: message.timestamp,
-        type: message.type,
-        hasMedia: message.hasMedia,
-    };
 }
 
 async function updateStatus(db, rowId, status) {
@@ -422,41 +407,12 @@ export function registerContactRoutes(app, { initialMessage }) {
                 return;
             }
 
-            const chat = await getChatById(chatId);
-            if (!chat) {
+            const result = await fetchChatMessages(chatId, options, { clean: Boolean(clean) });
+            if (!result) {
                 res.status(404).json({ error: 'Chat not found.' });
                 return;
             }
-
-            const messages = await chat.fetchMessages(options);
-            if (clean) {
-                const chatlog = Array.isArray(messages)
-                    ? messages
-                          .map((message) => {
-                              if (!message || typeof message !== 'object') return null;
-                              const rawBody = typeof message.body === 'string' ? message.body : '';
-                              const body = rawBody.trim();
-                              if (!body) {
-                                  if (message.hasMedia) {
-                                      const mediaType = message.type ? String(message.type) : 'media';
-                                      const label = `media:${mediaType}`;
-                                      return message.fromMe ? `me: [${label}]` : `them: [${label}]`;
-                                  }
-                                  return null;
-                              }
-                              return message.fromMe ? `me: ${body}` : `them: ${body}`;
-                          })
-                          .filter(Boolean)
-                          .join('\n')
-                    : '';
-                res.json({ chatlog });
-                return;
-            }
-
-            const payload = Array.isArray(messages)
-                ? messages.map(serializeMessage).filter(Boolean)
-                : [];
-            res.json({ messages: payload });
+            res.json(result);
         } catch (err) {
             console.error('Failed to fetch messages:', err);
             res.status(500).json({ error: 'Failed to fetch messages.' });

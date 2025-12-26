@@ -1,8 +1,10 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import whatsappWeb from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
 import { CHROME_EXECUTABLE_PATH, WHATSAPP_KEEP_ALIVE_MS, WHATSAPP_STATE_POLL_MS } from './config.js';
 
-const { Client, LocalAuth } = whatsappWeb;
+const { Client, LocalAuth, MessageMedia } = whatsappWeb;
 
 let client = null;
 let ready = false;
@@ -53,6 +55,45 @@ function logEvent(event, args) {
     const summary = args.map(formatEventArg).join(' | ');
     const suffix = summary ? ` ${summary}` : '';
     console.log(`[WA_EVENT] ${event}${suffix}`);
+}
+
+function serializeMessage(message) {
+    if (!message || typeof message !== 'object') {
+        return null;
+    }
+    return {
+        id: message.id && (message.id._serialized || message.id.id || message.id),
+        body: message.body,
+        from: message.from,
+        to: message.to,
+        fromMe: message.fromMe,
+        timestamp: message.timestamp,
+        type: message.type,
+        hasMedia: message.hasMedia,
+    };
+}
+
+function buildCleanChatlog(messages) {
+    if (!Array.isArray(messages)) {
+        return '';
+    }
+    return messages
+        .map((message) => {
+            if (!message || typeof message !== 'object') return null;
+            const rawBody = typeof message.body === 'string' ? message.body : '';
+            const body = rawBody.trim();
+            if (!body) {
+                if (message.hasMedia) {
+                    const mediaType = message.type ? String(message.type) : 'media';
+                    const label = `media:${mediaType}`;
+                    return message.fromMe ? `me: [${label}]` : `them: [${label}]`;
+                }
+                return null;
+            }
+            return message.fromMe ? `me: ${body}` : `them: ${body}`;
+        })
+        .filter(Boolean)
+        .join('\n');
 }
 
 export function initWhatsAppClient() {
@@ -241,7 +282,57 @@ export async function sendMessage(chatId, message) {
         throw new Error('WhatsApp client not initialized.');
     }
     await sleep(500);
-    return client.sendMessage(chatId, message);
+    const chat = await getChatById(chatId);
+    if (!chat) {
+        throw new Error('Chat not found.');
+    }
+    await chat.sendStateTyping();
+    return chat.sendMessage(message);
+}
+export async function sendMedia(chatId, mediaDirectory) {
+    if (!client) {
+        throw new Error('WhatsApp client not initialized.');
+    }
+
+    if (!fs.existsSync(mediaDirectory)) {
+        throw new Error(`Media directory not found: ${mediaDirectory}`);
+    }
+
+    const entries = fs.readdirSync(mediaDirectory, { withFileTypes: true });
+    const files = entries
+        .filter((entry) => entry.isFile())
+        .map((entry) => entry.name)
+        .filter((name) => !name.startsWith('.'))
+        .sort((a, b) => a.localeCompare(b));
+    if (files.length === 0) {
+        return false;
+    }
+
+    for (const filename of files) {
+        const mediaPath = path.join(mediaDirectory, filename);
+        const media = MessageMedia.fromFilePath(mediaPath);
+        await client.sendMessage(chatId, media, { sendMediaAsHd: true });
+        await sleep(200);
+    }
+    return true;
+}
+
+export async function fetchChatMessages(chatId, options = {}, { clean = false } = {}) {
+    if (!client) {
+        throw new Error('WhatsApp client not initialized.');
+    }
+    const chat = await client.getChatById(chatId);
+    if (!chat) {
+        return null;
+    }
+    const messages = await chat.fetchMessages(options);
+    if (clean) {
+        return { chatlog: buildCleanChatlog(messages) };
+    }
+    const payload = Array.isArray(messages)
+        ? messages.map(serializeMessage).filter(Boolean)
+        : [];
+    return { messages: payload };
 }
 
 export async function getChatById(chatId) {

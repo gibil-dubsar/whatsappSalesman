@@ -8,6 +8,7 @@ export const ROOT_DIR = path.resolve(__dirname, '..');
 export const DB_PATH = path.join(ROOT_DIR, 'seller_background.db');
 export const TABLE_NAME = 'seller_background';
 export const PROPERTY_CONTEXT_PATH = path.join(ROOT_DIR, 'property_context.json');
+export const IMAGE_DIRECTORY = path.join(ROOT_DIR, 'SelectedHouseImages');
 export const PORT = Number.parseInt(process.env.PORT || '3300', 10);
 export const CHROME_EXECUTABLE_PATH = process.env.CHROME_PATH || (() => {
     if (process.platform === 'darwin') {
