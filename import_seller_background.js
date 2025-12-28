@@ -11,8 +11,7 @@ const CSV_PATH = process.argv[2] || path.join(__dirname, 'seller_background_data
 const DB_PATH = process.argv[3] || path.join(__dirname, 'seller_background.db');
 const TABLE_NAME = 'seller_background';
 
-const KEEP_COLUMNS = ['contactName', 'agentName', 'cleanContactNumber'];
-const NOTES_COLUMN = 'notes';
+const KEEP_COLUMNS = ['contactName', 'agentName', 'cleanContactNumber', 'group'];
 
 const sqlite = sqlite3.verbose();
 
@@ -38,6 +37,7 @@ function ensureTable(db) {
       "contactName" TEXT,
       "agentName" TEXT,
       "cleanContactNumber" TEXT,
+      "group" TEXT,
       "notes" TEXT,
       "conversation_started" TEXT DEFAULT 'pending'
     )`
@@ -51,34 +51,23 @@ function normalizeValue(value) {
   return trimmed === '' ? null : trimmed;
 }
 
-function buildNotes(record, noteColumns) {
-  const notes = {};
-  for (const key of noteColumns) {
-    if (!key) continue;
-    const value = normalizeValue(record[key]);
-    if (value !== null) {
-      notes[key] = value;
-    }
-  }
-  return Object.keys(notes).length > 0 ? JSON.stringify(notes) : null;
-}
-
-function insertRows(db, records, noteColumns) {
+function insertRows(db, records) {
   const stmt = db.prepare(
     `INSERT INTO "${TABLE_NAME}" (
       "contactName",
       "agentName",
       "cleanContactNumber",
+      "group",
       "notes"
-    ) VALUES (?, ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?)`
   );
 
   for (const record of records) {
     const contactName = normalizeValue(record.contactName);
     const agentName = normalizeValue(record.agentName);
     const cleanContactNumber = normalizeValue(record.cleanContactNumber);
-    const notes = buildNotes(record, noteColumns);
-    stmt.run([contactName, agentName, cleanContactNumber, notes]);
+    const group = normalizeValue(record.group);
+    stmt.run([contactName, agentName, cleanContactNumber, group, null]);
   }
   stmt.finalize();
 }
@@ -95,12 +84,10 @@ function main() {
     process.exit(1);
   }
 
-  const noteColumns = headerColumns.filter((name) => name && !KEEP_COLUMNS.includes(name));
-
   const db = new sqlite.Database(DB_PATH);
   db.serialize(() => {
     ensureTable(db);
-    insertRows(db, records, noteColumns);
+    insertRows(db, records);
   });
   db.close();
 

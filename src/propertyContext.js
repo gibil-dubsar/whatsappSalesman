@@ -20,7 +20,7 @@ export function validatePropertyContext(context) {
         }
     }
 
-    const requiredLocation = ['address', 'city', 'maps_url'];
+    const requiredLocation = ['address', 'city', 'maps_url', 'flood_risk'];
     for (const key of requiredLocation) {
         if (!context.location[key]) {
             throw new Error(`Property context location missing required field: ${key}`);

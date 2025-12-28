@@ -13,17 +13,21 @@ app.get('/', (_req, res) => {
 });
 
 let initialMessage = '';
+let followupMessage = '';
 let propertyContext = null;
 try {
     propertyContext = loadPropertyContext();
-    initialMessage = propertyContext.messages?.initial || '';
+    initialMessage = propertyContext.messages.initial;
+    followupMessage =propertyContext.messages.followup;
     console.log(`Property context loaded: ${propertyContext.title || 'untitled'}`);
+    console.log(`Initial message: ${initialMessage}`);
+    console.log(`Follow-up message: ${followupMessage}`);
 } catch (err) {
     console.error(err.message);
     process.exit(1);
 }
 
-registerContactRoutes(app, { initialMessage });
+registerContactRoutes(app, { initialMessage, followupMessage, propertyContext });
 
 app.listen(PORT, () => {
     console.log(`UI server running at http://localhost:${PORT}`);

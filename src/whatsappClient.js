@@ -2,7 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import whatsappWeb from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
-import { CHROME_EXECUTABLE_PATH, WHATSAPP_KEEP_ALIVE_MS, WHATSAPP_STATE_POLL_MS } from './config.js';
+import {
+    CHROME_EXECUTABLE_PATH,
+    WHATSAPP_KEEP_ALIVE_MS,
+    WHATSAPP_STATE_POLL_MS,
+    WHATSAPP_TYPING_DELAY_MS
+} from './config.js';
 
 const { Client, LocalAuth, MessageMedia } = whatsappWeb;
 
@@ -57,6 +62,37 @@ function logEvent(event, args) {
     console.log(`[WA_EVENT] ${event}${suffix}`);
 }
 
+function getMessageContent(message) {
+    if (!message || typeof message !== 'object') {
+        return '';
+    }
+    const rawBody = typeof message.body === 'string' ? message.body : '';
+    const body = rawBody.trim();
+    if (body) {
+        return body;
+    }
+    if (message.hasMedia) {
+        const mediaType = message.type ? String(message.type) : 'media';
+        return `User sent media: ${mediaType}`;
+    }
+    return '';
+}
+
+function formatMessageLine(message) {
+    if (!message || typeof message !== 'object') return null;
+    const rawBody = typeof message.body === 'string' ? message.body : '';
+    const body = rawBody.trim();
+    if (!body) {
+        if (message.hasMedia) {
+            const mediaType = message.type ? String(message.type) : 'media';
+            const label = `media:${mediaType}`;
+            return message.fromMe ? `me: [${label}]` : `them: [${label}]`;
+        }
+        return null;
+    }
+    return message.fromMe ? `me: ${body}` : `them: ${body}`;
+}
+
 function serializeMessage(message) {
     if (!message || typeof message !== 'object') {
         return null;
@@ -78,20 +114,7 @@ function buildCleanChatlog(messages) {
         return '';
     }
     return messages
-        .map((message) => {
-            if (!message || typeof message !== 'object') return null;
-            const rawBody = typeof message.body === 'string' ? message.body : '';
-            const body = rawBody.trim();
-            if (!body) {
-                if (message.hasMedia) {
-                    const mediaType = message.type ? String(message.type) : 'media';
-                    const label = `media:${mediaType}`;
-                    return message.fromMe ? `me: [${label}]` : `them: [${label}]`;
-                }
-                return null;
-            }
-            return message.fromMe ? `me: ${body}` : `them: ${body}`;
-        })
+        .map(formatMessageLine)
         .filter(Boolean)
         .join('\n');
 }
@@ -287,6 +310,15 @@ export async function sendMessage(chatId, message) {
         throw new Error('Chat not found.');
     }
     await chat.sendStateTyping();
+    const text = typeof message === 'string' ? message : String(message || '');
+    const perCharMs = 55;
+    const minDelayMs = 2000;
+    const maxDelayMs = 25000;
+    const scaledDelay = Math.round(text.length * perCharMs);
+    const delayMs = Math.min(maxDelayMs, Math.max(minDelayMs, scaledDelay));
+    if (delayMs > 0) {
+        await sleep(delayMs);
+    }
     return chat.sendMessage(message);
 }
 export async function sendMedia(chatId, mediaDirectory) {
@@ -333,6 +365,84 @@ export async function fetchChatMessages(chatId, options = {}, { clean = false } 
         ? messages.map(serializeMessage).filter(Boolean)
         : [];
     return { messages: payload };
+}
+
+export async function isChatTyping(chatId) {
+    if (!client) {
+        throw new Error('WhatsApp client not initialized.');
+    }
+    return client.pupPage.evaluate(async (id) => {
+        const getChat = window.WWebJS?.getChat;
+        if (!getChat) return false;
+        const chat = await getChat(id, { getAsModel: false });
+        if (!chat) return false;
+
+        const presence = chat.presence || chat.presenceData || chat.__x_presence || null;
+        if (!presence) return false;
+
+        const data = typeof presence.serialize === 'function' ? presence.serialize() : presence;
+        const state = data?.chatstate || data?.state || data?.type || '';
+        if (typeof state === 'string') {
+            const normalized = state.toLowerCase();
+            if (['composing', 'typing', 'recording'].includes(normalized)) {
+                return true;
+            }
+        }
+
+        const isComposing = data?.isComposing;
+        const isTyping = data?.isTyping;
+        const isRecording = data?.isRecording;
+        return Boolean(isComposing || isTyping || isRecording);
+    }, chatId);
+}
+
+export async function getUnrepliedMessagesSnapshot(chatId, { limit = 250 } = {}) {
+    if (!client) {
+        throw new Error('WhatsApp client not initialized.');
+    }
+    const chat = await client.getChatById(chatId);
+    if (!chat) {
+        return null;
+    }
+    const messages = await chat.fetchMessages({ limit });
+    if (!Array.isArray(messages)) {
+        return { history: '', pending: [] };
+    }
+    const normalized = messages
+        .filter((message) => message && typeof message === 'object')
+        .map((message) => ({
+            fromMe: Boolean(message.fromMe),
+            body: message.body,
+            hasMedia: Boolean(message.hasMedia),
+            type: message.type,
+            timestamp: Number(message.timestamp) || 0,
+        }))
+        .sort((a, b) => a.timestamp - b.timestamp);
+
+    let lastOutgoingIndex = -1;
+    for (let i = 0; i < normalized.length; i += 1) {
+        if (normalized[i].fromMe) {
+            lastOutgoingIndex = i;
+        }
+    }
+
+    const historyMessages = lastOutgoingIndex >= 0
+        ? normalized.slice(0, lastOutgoingIndex + 1)
+        : [];
+    const pending = normalized
+        .slice(lastOutgoingIndex + 1)
+        .filter((message) => !message.fromMe)
+        .map((message) => ({
+            content: getMessageContent(message),
+            hasMedia: message.hasMedia,
+            type: message.type,
+        }))
+        .filter((message) => message.content);
+
+    return {
+        history: buildCleanChatlog(historyMessages),
+        pending,
+    };
 }
 
 export async function getChatById(chatId) {

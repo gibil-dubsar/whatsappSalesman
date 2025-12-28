@@ -31,6 +31,8 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [initiatingId, setInitiatingId] = useState(null)
   const [statusUpdatingId, setStatusUpdatingId] = useState(null)
+  const [respondingId, setRespondingId] = useState(null)
+  const [statusFilter, setStatusFilter] = useState('all')
   const [toast, setToast] = useState(null)
   const formRef = useRef(null)
   const [activeTab, setActiveTab] = useState('contacts')
@@ -55,6 +57,13 @@ function App() {
     const unregistered = contacts.filter((c) => normalizeStatus(c.conversation_started) === 'unregistered').length
     return { total, pending, active, paused, unregistered }
   }, [contacts])
+
+  const filteredContacts = useMemo(() => {
+    if (statusFilter === 'all') return contacts
+    return contacts.filter(
+      (contact) => normalizeStatus(contact.conversation_started) === statusFilter,
+    )
+  }, [contacts, statusFilter])
 
   async function loadContacts() {
     setLoading(true)
@@ -162,6 +171,25 @@ function App() {
       showToast(err.message, 'error')
     } finally {
       setStatusUpdatingId(null)
+    }
+  }
+
+  async function respondWithLlm(rowid) {
+    setRespondingId(rowid)
+    try {
+      const data = await fetchJson(`/api/contacts/${rowid}/respond`, { method: 'POST' })
+      if (data.responded > 0) {
+        showToast(`Sent ${data.responded} reply${data.responded > 1 ? 'ies' : ''}.`)
+      } else {
+        showToast('No unreplied messages found.')
+      }
+      if (data.paused) {
+        loadContacts()
+      }
+    } catch (err) {
+      showToast(err.message, 'error')
+    } finally {
+      setRespondingId(null)
     }
   }
 
@@ -305,13 +333,37 @@ function App() {
           <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <h2 className="text-lg font-semibold text-gray-900">Contacts</h2>
-            <button
-              type="button"
-              onClick={loadContacts}
-              className="rounded-full border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:border-gray-300"
-            >
-              Refresh
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { id: 'all', label: 'All' },
+                  { id: 'pending', label: 'Pending' },
+                  { id: 'active', label: 'Active' },
+                  { id: 'paused', label: 'Paused' },
+                  { id: 'unregistered', label: 'Unregistered' },
+                ].map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => setStatusFilter(option.id)}
+                    className={`rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition ${
+                      statusFilter === option.id
+                        ? 'bg-gray-900 text-white'
+                        : 'border border-gray-200 text-gray-600 hover:border-gray-300'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={loadContacts}
+                className="rounded-full border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:border-gray-300"
+              >
+                Refresh
+              </button>
+            </div>
           </div>
 
           <div className="mt-6 grid gap-4">
@@ -320,15 +372,16 @@ function App() {
                 Loading contacts...
               </div>
             )}
-            {!loading && contacts.length === 0 && (
+            {!loading && filteredContacts.length === 0 && (
               <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-sm text-gray-500">
-                No contacts found.
+                No contacts found for this filter.
               </div>
             )}
             {!loading &&
-              contacts.map((contact) => {
+              filteredContacts.map((contact) => {
                 const status = normalizeStatus(contact.conversation_started)
                 const metaParts = [
+                  contact.group ? `Group: ${contact.group}` : null,
                   contact.agentName && contact.agentName !== contact.contactName
                     ? `Agent: ${contact.agentName}`
                     : null,
@@ -398,6 +451,16 @@ function App() {
                           className="rounded-full border border-orange-200 px-4 py-2 text-sm font-semibold text-orange-700 transition hover:border-orange-300 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           Pause
+                        </button>
+                      )}
+                      {status !== 'unregistered' && (
+                        <button
+                          type="button"
+                          onClick={() => respondWithLlm(contact.rowid)}
+                          disabled={respondingId === contact.rowid}
+                          className="rounded-full border border-sky-200 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {respondingId === contact.rowid ? 'Responding...' : 'Respond'}
                         </button>
                       )}
                       <button

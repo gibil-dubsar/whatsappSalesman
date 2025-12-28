@@ -1,5 +1,6 @@
 import { dbAll, dbGet, dbRun, openDatabase, closeDatabase } from '../db.js';
-import { STATUS, TABLE_NAME } from '../config.js';
+import { IMAGE_DIRECTORY, STATUS, TABLE_NAME } from '../config.js';
+import { generateGeminiResponse } from '../geminiClient.js';
 import {
     getLatestQr,
     getConnectionState,
@@ -10,8 +11,11 @@ import {
     isClientReady,
     getChatById,
     fetchChatMessages,
+    getUnrepliedMessagesSnapshot,
     isRegisteredUser,
-    sendMessage
+    isChatTyping,
+    sendMessage,
+    sendMedia
 } from '../whatsappClient.js';
 
 function parseRowId(value) {
@@ -55,6 +59,41 @@ function toChatId(contactNumber) {
     return `${sanitizedNumber}@c.us`;
 }
 
+function serializeContact(contact) {
+    if (!contact || typeof contact !== 'object') {
+        return null;
+    }
+    return {
+        id: contact.id?._serialized || contact.id?.user || null,
+        number: contact.number || null,
+        name: contact.name || null,
+        pushname: contact.pushname || null,
+        shortName: contact.shortName || null,
+        isMyContact: Boolean(contact.isMyContact),
+        isWAContact: Boolean(contact.isWAContact),
+        isBusiness: Boolean(contact.isBusiness),
+        isUser: Boolean(contact.isUser),
+        isGroup: Boolean(contact.isGroup),
+        isBlocked: Boolean(contact.isBlocked),
+    };
+}
+
+function serializeChat(chat) {
+    if (!chat || typeof chat !== 'object') {
+        return null;
+    }
+    return {
+        id: chat.id?._serialized || null,
+        name: chat.name || null,
+        isGroup: Boolean(chat.isGroup),
+        unreadCount: chat.unreadCount || 0,
+        timestamp: chat.timestamp || null,
+        isMuted: Boolean(chat.isMuted),
+        archived: Boolean(chat.archived),
+        pinned: Boolean(chat.pinned),
+    };
+}
+
 async function loadContactForChat(db, rowId) {
     return dbGet(
         db,
@@ -76,9 +115,14 @@ async function updateStatus(db, rowId, status) {
 async function loadContacts(db) {
     return dbAll(
         db,
-        `SELECT rowid, contactName, agentName, cleanContactNumber, notes, conversation_started
+        `SELECT rowid, contactName, agentName, cleanContactNumber, "group", notes, conversation_started
          FROM "${TABLE_NAME}"
-         ORDER BY rowid DESC`
+         ORDER BY "group" IS NULL,
+                  "group" COLLATE NOCASE,
+                  agentName IS NULL,
+                  agentName COLLATE NOCASE,
+                  contactName IS NULL,
+                  contactName COLLATE NOCASE`
     );
 }
 
@@ -97,7 +141,13 @@ function normalizeDefaultValue(value) {
     return text;
 }
 
-export function registerContactRoutes(app, { initialMessage }) {
+function appendHistoryLine(history, line) {
+    if (!line) return history;
+    if (!history) return line;
+    return `${history}\n${line}`;
+}
+
+export function registerContactRoutes(app, { initialMessage, followupMessage, propertyContext }) {
     app.get('/api/status', (_req, res) => {
         res.json({
             whatsappReady: isClientReady(),
@@ -274,12 +324,140 @@ export function registerContactRoutes(app, { initialMessage }) {
                 res.status(500).json({ error: 'Initial message is not configured.' });
                 return;
             }
-            await sendMessage(chatId, initialMessage);
+            let messageToSend = initialMessage;
+
+            const chat = await getChatById(chatId);
+            if (chat) {
+                try {
+                    await chat.syncHistory();
+                    const historyResult = await fetchChatMessages(chatId, { limit: 5 });
+                    console.log('Recent chat messages:', historyResult);
+                    const hasHistory = Array.isArray(historyResult?.messages) && historyResult.messages.length > 1;
+                    console.log(`Chat has history: ${hasHistory}`);
+                    if (hasHistory) {
+                        messageToSend = followupMessage || initialMessage;
+                    }
+                } catch (err) {
+                    console.error('Failed to sync history before initiating:', err);
+                }
+            }
+
+            await sendMessage(chatId, messageToSend);
             await updateStatus(db, rowId, STATUS.ACTIVE);
             res.json({ status: STATUS.ACTIVE });
         } catch (err) {
             console.error('Failed to initiate conversation:', err);
             res.status(500).json({ error: 'Failed to initiate conversation.' });
+        } finally {
+            try {
+                await closeDatabase(db);
+            } catch (err) {
+                console.error('Failed to close database:', err);
+            }
+        }
+    });
+
+    app.post('/api/contacts/:rowid/respond', async (req, res) => {
+        if (!isClientReady()) {
+            res.status(503).json({ error: 'WhatsApp client not ready. Scan the QR code in the terminal.' });
+            return;
+        }
+
+        if (!propertyContext) {
+            res.status(500).json({ error: 'Property context not available.' });
+            return;
+        }
+
+        const rowId = parseRowId(req.params.rowid);
+        if (!rowId) {
+            res.status(400).json({ error: 'Invalid contact id.' });
+            return;
+        }
+
+        const db = openDatabase();
+        try {
+            const row = await loadContactForChat(db, rowId);
+            if (!row) {
+                res.status(404).json({ error: 'Contact not found.' });
+                return;
+            }
+
+            const chatId = toChatId(row.cleanContactNumber);
+            if (!chatId) {
+                res.status(400).json({ error: 'Contact missing cleanContactNumber.' });
+                return;
+            }
+
+            const chat = await getChatById(chatId);
+            if (!chat) {
+                res.status(404).json({ error: 'Chat not found.' });
+                return;
+            }
+
+            let contactInfo = null;
+            try {
+                const contact = await chat.getContact();
+                contactInfo = serializeContact(contact);
+            } catch (err) {
+                console.warn('Failed to load contact info for respond:', err);
+            }
+
+            const snapshot = await getUnrepliedMessagesSnapshot(chatId, { limit: 250 });
+            if (!snapshot) {
+                res.status(404).json({ error: 'Chat not found.' });
+                return;
+            }
+
+            const pending = snapshot.pending || [];
+            if (pending.length === 0) {
+                res.json({ responded: 0, paused: false });
+                return;
+            }
+
+            let history = snapshot.history || '';
+            let responded = 0;
+            let paused = false;
+
+            for (const pendingMessage of pending) {
+                const content = pendingMessage.content;
+                if (!content) {
+                    continue;
+                }
+
+                const result = await generateGeminiResponse({
+                    propertyContext,
+                    message: content,
+                    conversationHistory: history,
+                    contactInfo,
+                });
+
+                if (result.action === 'reply' && (result.reply || result.media === 'include')) {
+                    if (result.reply) {
+                        await sendMessage(chatId, String(result.reply));
+                    }
+                    if (result.media === 'include') {
+                        await sendMedia(chatId, IMAGE_DIRECTORY);
+                    }
+                    responded += 1;
+                    history = appendHistoryLine(history, `them: ${content}`);
+                    if (result.reply) {
+                        history = appendHistoryLine(history, `me: ${result.reply}`);
+                    }
+                    if (result.media === 'include') {
+                        history = appendHistoryLine(history, 'me: [media:image]');
+                    }
+                    continue;
+                }
+
+                await updateStatus(db, rowId, STATUS.PAUSED);
+                paused = true;
+                break;
+            }
+
+            res.json({ responded, paused });
+        } catch (err) {
+            console.error('Failed to respond with LLM:', err);
+            res.status(500).json({ error: 'Failed to respond with LLM.' });
         } finally {
             try {
                 await closeDatabase(db);
@@ -422,6 +600,50 @@ export function registerContactRoutes(app, { initialMessage }) {
             } catch (err) {
                 console.error('Failed to close database:', err);
             }
+        }
+    });
+
+    app.get('/api/debug/typing', async (req, res) => {
+        if (!isClientReady()) {
+            res.status(503).json({ error: 'WhatsApp client not ready. Scan the QR code in the terminal.' });
+            return;
+        }
+
+        const rawNumber = typeof req.query.phone === 'string' ? req.query.phone : '';
+        const chatId = toChatId(rawNumber);
+        if (!chatId) {
+            res.status(400).json({ error: 'Provide phone query param, e.g. ?phone=94771234567.' });
+            return;
+        }
+
+        try {
+            const chat = await getChatById(chatId);
+            if (!chat) {
+                res.status(404).json({ error: 'Chat not found.' });
+                return;
+            }
+
+            const typing = await isChatTyping(chatId);
+            const messagesResult = await fetchChatMessages(chatId, { limit: 3 });
+            let contactInfo = null;
+            let chatInfo = null;
+            try {
+                const contact = await chat.getContact();
+                contactInfo = serializeContact(contact);
+            } catch (err) {
+                console.warn('Failed to load contact info for debug:', err);
+            }
+            chatInfo = serializeChat(chat);
+            res.json({
+                chatId,
+                typing,
+                chat: chatInfo,
+                contact: contactInfo,
+                messages: messagesResult?.messages || []
+            });
+        } catch (err) {
+            console.error('Failed to check typing status:', err);
+            res.status(500).json({ error: 'Failed to check typing status.' });
         }
     });
 }
