@@ -418,40 +418,41 @@ export function registerContactRoutes(app, { initialMessage, followupMessage, pr
             let responded = 0;
             let paused = false;
 
-            for (const pendingMessage of pending) {
-                const content = pendingMessage.content;
-                if (!content) {
-                    continue;
+            const combinedContent = pending
+                .map((pendingMessage) => pendingMessage.content)
+                .filter(Boolean)
+                .join('\n');
+
+            if (!combinedContent) {
+                res.json({ responded: 0, paused: false });
+                return;
+            }
+
+            const result = await generateGeminiResponse({
+                propertyContext,
+                message: combinedContent,
+                conversationHistory: history,
+                contactInfo,
+            });
+
+            if (result.action === 'reply' && (result.reply || result.media === 'include')) {
+                if (result.reply) {
+                    await sendMessage(chatId, String(result.reply));
                 }
-
-                const result = await generateGeminiResponse({
-                    propertyContext,
-                    message: content,
-                    conversationHistory: history,
-                    contactInfo,
-                });
-
-                if (result.action === 'reply' && (result.reply || result.media === 'include')) {
-                    if (result.reply) {
-                        await sendMessage(chatId, String(result.reply));
-                    }
-                    if (result.media === 'include') {
-                        await sendMedia(chatId, IMAGE_DIRECTORY);
-                    }
-                    responded += 1;
-                    history = appendHistoryLine(history, `them: ${content}`);
-                    if (result.reply) {
-                        history = appendHistoryLine(history, `me: ${result.reply}`);
-                    }
-                    if (result.media === 'include') {
-                        history = appendHistoryLine(history, 'me: [media:image]');
-                    }
-                    continue;
+                if (result.media === 'include') {
+                    await sendMedia(chatId, IMAGE_DIRECTORY);
                 }
-
+                responded = 1;
+                history = appendHistoryLine(history, `them: ${combinedContent}`);
+                if (result.reply) {
+                    history = appendHistoryLine(history, `me: ${result.reply}`);
+                }
+                if (result.media === 'include') {
+                    history = appendHistoryLine(history, 'me: [media:image]');
+                }
+            } else {
                 await updateStatus(db, rowId, STATUS.PAUSED);
                 paused = true;
-                break;
             }
 
             res.json({ responded, paused });

@@ -31,6 +31,10 @@ export const WHATSAPP_TYPING_DELAY_MS = Number.parseInt(
     process.env.WA_TYPING_DELAY_MS || '1200',
     10
 );
+export const WHATSAPP_REINIT_DELAY_MS = Number.parseInt(
+    process.env.WA_REINIT_DELAY_MS || '4000',
+    10
+);
 
 export const STATUS = {
     PENDING: 'pending',

@@ -6,7 +6,8 @@ import {
     CHROME_EXECUTABLE_PATH,
     WHATSAPP_KEEP_ALIVE_MS,
     WHATSAPP_STATE_POLL_MS,
-    WHATSAPP_TYPING_DELAY_MS
+    WHATSAPP_TYPING_DELAY_MS,
+    WHATSAPP_REINIT_DELAY_MS
 } from './config.js';
 
 const { Client, LocalAuth, MessageMedia } = whatsappWeb;
@@ -21,12 +22,63 @@ let connectionState = 'unknown';
 let keepAliveTimer = null;
 let pollTimer = null;
 let messageHandler = null;
+let reinitScheduled = false;
+let reinitInProgress = false;
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 function updateStatus(nextStatus, detail = '') {
     status = nextStatus;
     statusDetail = detail || '';
     statusUpdatedAt = Date.now();
+}
+
+function clearTimers() {
+    if (keepAliveTimer) {
+        clearInterval(keepAliveTimer);
+        keepAliveTimer = null;
+    }
+    if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+    }
+}
+
+async function destroyClient() {
+    if (!client) return;
+    try {
+        client.removeAllListeners();
+    } catch (err) {
+        console.warn('Failed to remove WhatsApp listeners:', err);
+    }
+    try {
+        await client.destroy();
+    } catch (err) {
+        console.warn('Failed to destroy WhatsApp client:', err);
+    }
+    client = null;
+}
+
+function scheduleReinit(reason) {
+    if (reinitScheduled || reinitInProgress) {
+        return;
+    }
+    reinitScheduled = true;
+    updateStatus('restarting', reason || '');
+    setTimeout(async () => {
+        reinitScheduled = false;
+        if (reinitInProgress) return;
+        reinitInProgress = true;
+        clearTimers();
+        ready = false;
+        latestQr = null;
+        connectionState = 'unknown';
+        await destroyClient();
+        try {
+            initWhatsAppClient();
+        } finally {
+            reinitInProgress = false;
+        }
+    }, WHATSAPP_REINIT_DELAY_MS);
 }
 
 function isStoreReady() {
@@ -209,6 +261,7 @@ export function initWhatsAppClient() {
         connectionState = 'DISCONNECTED';
         updateStatus('disconnected', reason);
         console.warn('WhatsApp client disconnected:', reason);
+        scheduleReinit(reason || 'disconnected');
     });
 
     client.on('message', (msg) => {
