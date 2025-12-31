@@ -15,7 +15,9 @@ import {
     isRegisteredUser,
     isChatTyping,
     sendMessage,
-    sendMedia
+    sendMedia,
+    sendSeen,
+    reactToMessage
 } from '../whatsappClient.js';
 
 function parseRowId(value) {
@@ -139,12 +141,6 @@ function normalizeDefaultValue(value) {
         return text.slice(1, -1);
     }
     return text;
-}
-
-function appendHistoryLine(history, line) {
-    if (!line) return history;
-    if (!history) return line;
-    return `${history}\n${line}`;
 }
 
 export function registerContactRoutes(app, { initialMessage, followupMessage, propertyContext }) {
@@ -443,13 +439,16 @@ export function registerContactRoutes(app, { initialMessage, followupMessage, pr
                     await sendMedia(chatId, IMAGE_DIRECTORY);
                 }
                 responded = 1;
-                history = appendHistoryLine(history, `them: ${combinedContent}`);
-                if (result.reply) {
-                    history = appendHistoryLine(history, `me: ${result.reply}`);
+            } else if (result.action === 'ack') {
+                const lastPending = pending.slice().reverse().find((item) => item.messageId);
+                if (result.ack === 'thumbs_up' && lastPending?.messageId) {
+                    await reactToMessage(lastPending.messageId, '👍');
+                } else {
+                    await sendSeen(chatId);
                 }
-                if (result.media === 'include') {
-                    history = appendHistoryLine(history, 'me: [media:image]');
-                }
+                responded = 0;
+                res.json({ responded, paused, ack: result.ack || 'seen' });
+                return;
             } else {
                 await updateStatus(db, rowId, STATUS.PAUSED);
                 paused = true;

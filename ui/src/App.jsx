@@ -178,7 +178,9 @@ function App() {
     setRespondingId(rowid)
     try {
       const data = await fetchJson(`/api/contacts/${rowid}/respond`, { method: 'POST' })
-      if (data.responded > 0) {
+      if (data.ack) {
+        showToast(`Acknowledged (${data.ack === 'thumbs_up' ? 'thumbs up' : 'seen'}).`)
+      } else if (data.responded > 0) {
         showToast(`Sent ${data.responded} reply${data.responded > 1 ? 'ies' : ''}.`)
       } else {
         showToast('No unreplied messages found.')

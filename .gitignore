@@ -13,3 +13,6 @@ property_context.json
 tested_numbers.txt
 log.txt
 .env
+*.csv
+*.db
+*.sqlite

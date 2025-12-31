@@ -26,11 +26,13 @@ function buildPrompt(propertyContext, message, conversationHistory, contactInfo)
         'Use ONLY the property context JSON below to answer questions.',
         'Use the contact info to identify who you are speaking with.',
         'If you cannot confidently determine a name, address them in a generic fashion such as "Sir/Madam".',
+        'If the user gives a simple acknowledgement or confirmation with no new question, you may respond with:',
+        '{"action":"ack","ack":"seen"} or {"action":"ack","ack":"thumbs_up"}',
         'If the user asks for information not present in the context, or the question is unclear, respond with:',
         '{"action":"pause","reply":"","media":"none"}',
         'If the user asks for property pictures, and pictures have not been provided previously, agree and then respond with:',
         '{"action":"reply","reply":"...","media":"include"}',
-        'Otherwise respond with JSON:',
+        'this will trigger the media inclusion in the response. Otherwise respond with JSON:',
         '{"action":"reply","reply":"...","media":"none"}',
         'Do not add any extra text outside the JSON.',
         'At the beginning of the conversation, if they want details, send a structured introduction (including the location link) of the property using the context information.',
@@ -100,11 +102,15 @@ export async function generateGeminiResponse({ propertyContext, message, convers
     const action = String(parsed.action).toLowerCase();
     const reply = typeof parsed.reply === 'string' ? parsed.reply : '';
     const media = typeof parsed.media === 'string' ? parsed.media.toLowerCase() : 'none';
-    if (!['reply', 'pause'].includes(action)) {
+    const ack = typeof parsed.ack === 'string' ? parsed.ack.toLowerCase() : 'seen';
+    if (!['reply', 'pause', 'ack'].includes(action)) {
         return { action: 'pause', reply: '', reason: 'invalid_action' };
     }
     if (!['include', 'none'].includes(media)) {
-        return { action, reply, media: 'none' };
+        return { action, reply, media: 'none', ack };
     }
-    return { action, reply, media };
+    if (!['seen', 'thumbs_up'].includes(ack)) {
+        return { action, reply, media, ack: 'seen' };
+    }
+    return { action, reply, media, ack };
 }

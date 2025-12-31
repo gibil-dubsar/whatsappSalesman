@@ -1,7 +1,7 @@
 import { dbAll, dbRun, openDatabase, closeDatabase } from './db.js';
 import { STATUS, TABLE_NAME, IMAGE_DIRECTORY } from './config.js';
 import { generateGeminiResponse } from './geminiClient.js';
-import { sendMessage, sendMedia, fetchChatMessages, isChatTyping } from './whatsappClient.js';
+import { sendMessage, sendMedia, fetchChatMessages, reactToMessage, sendSeen } from './whatsappClient.js';
 
 
 
@@ -78,9 +78,7 @@ async function setContactStatus(db, rowId, status) {
 }
 
 const inFlight = new Map();
-const QUIET_WINDOW_MS = 25000;
-const TYPING_WAIT_MS = 4 * 60 * 1000;
-const TYPING_POLL_MS = 15000;
+const QUIET_WINDOW_MS = 45000;
 
 function isActiveStatus(status) {
     return status === STATUS.ACTIVE || status === 'started';
@@ -111,21 +109,6 @@ async function processChatQueue(entry, contactRowId, chatId, propertyContext) {
     entry.timer = null;
     try {
         while (entry.buffer.length > 0) {
-            try {
-                const start = Date.now();
-                let typing = await isChatTyping(chatId);
-                while (typing && Date.now() - start < TYPING_WAIT_MS) {
-                    console.log('[autoResponder] User is typing; waiting 15s before checking again.');
-                    await sleep(TYPING_POLL_MS);
-                    typing = await isChatTyping(chatId);
-                }
-                if (typing) {
-                    console.log('[autoResponder] Typing wait exceeded 4 minutes; proceeding.');
-                }
-            } catch (err) {
-                console.warn('[autoResponder] Failed to check typing state:', err);
-            }
-
             const batch = entry.buffer.splice(0, entry.buffer.length);
             const content = batch.filter(Boolean).join('\n');
             if (!content) {
@@ -164,6 +147,16 @@ async function processChatQueue(entry, contactRowId, chatId, propertyContext) {
                     replySent: Boolean(result.reply),
                     mediaSent: result.media === 'include'
                 });
+                continue;
+            }
+
+            if (result.action === 'ack') {
+                if (result.ack === 'thumbs_up' && entry.lastMessageId) {
+                    await reactToMessage(entry.lastMessageId, '👍');
+                } else {
+                    await sendSeen(chatId);
+                }
+                console.log('[autoResponder] Acknowledged message', { ack: result.ack });
                 continue;
             }
 
@@ -223,6 +216,7 @@ export function createAutoResponder({ propertyContext }) {
                 console.warn('[autoResponder] Empty message content; skipping.');
                 return;
             }
+            const messageId = message?.id?._serialized || message?.id?.id || message?.id || null;
 
             const chatId = typeof message.from === 'string' ? message.from : '';
             if (!chatId) {
@@ -237,6 +231,9 @@ export function createAutoResponder({ propertyContext }) {
                 existing.buffer.push(content);
                 if (!existing.contactInfo && contactInfo) {
                     existing.contactInfo = contactInfo;
+                }
+                if (messageId) {
+                    existing.lastMessageId = messageId;
                 }
                 if (existing.timer) {
                     clearTimeout(existing.timer);
@@ -255,6 +252,7 @@ export function createAutoResponder({ propertyContext }) {
                 timer: null,
                 processing: false,
                 contactInfo,
+                lastMessageId: messageId,
             };
             inFlight.set(chatId, entry);
             entry.timer = setTimeout(() => {

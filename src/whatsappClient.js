@@ -374,6 +374,34 @@ export async function sendMessage(chatId, message) {
     }
     return chat.sendMessage(message);
 }
+
+export async function sendSeen(chatId) {
+    if (!client) {
+        throw new Error('WhatsApp client not initialized.');
+    }
+    const chat = await getChatById(chatId);
+    if (!chat) {
+        throw new Error('Chat not found.');
+    }
+    return chat.sendSeen();
+}
+
+export async function reactToMessage(messageId, reaction) {
+    if (!client) {
+        throw new Error('WhatsApp client not initialized.');
+    }
+    if (!messageId) {
+        return false;
+    }
+    await client.pupPage.evaluate(async (id, emoji) => {
+        if (!id) return null;
+        const msg =
+            window.Store.Msg.get(id) || (await window.Store.Msg.getMessagesById([id]))?.messages?.[0];
+        if (!msg) return null;
+        await window.Store.sendReactionToMsg(msg, emoji);
+    }, messageId, reaction);
+    return true;
+}
 export async function sendMedia(chatId, mediaDirectory) {
     if (!client) {
         throw new Error('WhatsApp client not initialized.');
@@ -464,6 +492,7 @@ export async function getUnrepliedMessagesSnapshot(chatId, { limit = 250 } = {})
     const normalized = messages
         .filter((message) => message && typeof message === 'object')
         .map((message) => ({
+            id: message.id && (message.id._serialized || message.id.id || message.id),
             fromMe: Boolean(message.fromMe),
             body: message.body,
             hasMedia: Boolean(message.hasMedia),
@@ -487,6 +516,7 @@ export async function getUnrepliedMessagesSnapshot(chatId, { limit = 250 } = {})
         .filter((message) => !message.fromMe)
         .map((message) => ({
             content: getMessageContent(message),
+            messageId: message.id || null,
             hasMedia: message.hasMedia,
             type: message.type,
         }))

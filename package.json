@@ -4,7 +4,8 @@
     "dev": "node scripts/dev.mjs",
     "dev:server": "node scripts/start-server.mjs",
     "dev:ui": "npm run dev --prefix ui",
-    "install:ui": "npm install --prefix ui"
+    "install:ui": "npm install --prefix ui",
+    "dedupe:contacts": "node dedupe_seller_background.js"
   },
   "dependencies": {
     "csv-parse": "^6.1.0",
