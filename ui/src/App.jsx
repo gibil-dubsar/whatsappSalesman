@@ -33,6 +33,7 @@ function App() {
   const [statusUpdatingId, setStatusUpdatingId] = useState(null)
   const [respondingId, setRespondingId] = useState(null)
   const [statusFilter, setStatusFilter] = useState('all')
+  const [expandedRowId, setExpandedRowId] = useState(null)
   const [toast, setToast] = useState(null)
   const formRef = useRef(null)
   const [activeTab, setActiveTab] = useState('contacts')
@@ -225,6 +226,10 @@ function App() {
     }
   }
 
+  function toggleRow(rowid) {
+    setExpandedRowId((current) => (current === rowid ? null : rowid))
+  }
+
   return (
     <div className="min-h-screen px-6 py-10 font-sans">
       <div className="mx-auto flex max-w-6xl flex-col gap-8">
@@ -382,6 +387,7 @@ function App() {
             {!loading &&
               filteredContacts.map((contact) => {
                 const status = normalizeStatus(contact.conversation_started)
+                const expanded = expandedRowId === contact.rowid
                 const metaParts = [
                   contact.group ? `Group: ${contact.group}` : null,
                   contact.agentName && contact.agentName !== contact.contactName
@@ -394,91 +400,118 @@ function App() {
                     key={contact.rowid}
                     className="flex flex-col gap-4 rounded-2xl border border-gray-200 bg-gray-50/60 p-4 md:flex-row md:items-center md:justify-between"
                   >
-                    <div>
-                      <p className="text-base font-semibold text-gray-900">
-                        {contact.contactName || contact.agentName || 'Unknown contact'}
-                      </p>
-                      <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        Row ID: {contact.rowid}
-                      </p>
-                      {metaParts.length > 0 && (
-                        <p className="mt-1 text-sm text-gray-600">{metaParts.join(' / ')}</p>
-                      )}
-                      <p className="mt-2 text-sm font-mono text-gray-600">
-                        {contact.cleanContactNumber || 'No cleanContactNumber'}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide ${STATUS_STYLES[status] || STATUS_STYLES.unknown}`}
+                    <div className="flex-1">
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => toggleRow(contact.rowid)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            toggleRow(contact.rowid)
+                          }
+                        }}
+                        className="flex flex-wrap items-start justify-between gap-4"
                       >
-                        {status}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => initiateContact(contact.rowid)}
-                        disabled={
-                          status === 'active' ||
-                          status === 'paused' ||
-                          status === 'unregistered' ||
-                          initiatingId === contact.rowid
-                        }
-                        className="rounded-full bg-gray-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300"
-                      >
-                        {status === 'active'
-                          ? 'Active'
-                          : status === 'paused'
-                          ? 'Paused'
-                          : status === 'unregistered'
-                          ? 'Unregistered'
-                          : initiatingId === contact.rowid
-                          ? 'Sending...'
-                          : 'Initiate'}
-                      </button>
-                      {status !== 'active' && status !== 'unregistered' && (
-                        <button
-                          type="button"
-                          onClick={() => setContactStatus(contact.rowid, 'active')}
-                          disabled={statusUpdatingId === contact.rowid}
-                          className="rounded-full border border-emerald-200 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          Set active
-                        </button>
+                        <div>
+                          <p className="text-base font-semibold text-gray-900">
+                            {contact.contactName || contact.agentName || 'Unknown contact'}
+                          </p>
+                          <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                            Row ID: {contact.rowid}
+                          </p>
+                          {metaParts.length > 0 && (
+                            <p className="mt-1 text-sm text-gray-600">{metaParts.join(' / ')}</p>
+                          )}
+                          <p className="mt-2 text-sm font-mono text-gray-600">
+                            {contact.cleanContactNumber || 'No cleanContactNumber'}
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide ${STATUS_STYLES[status] || STATUS_STYLES.unknown}`}
+                          >
+                            {status}
+                          </span>
+                          <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                            {expanded ? 'Hide actions' : 'Show actions'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {expanded && (
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 pt-4">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                            Actions
+                          </p>
+                          <div className="flex flex-wrap items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => initiateContact(contact.rowid)}
+                              disabled={
+                                status === 'active' ||
+                                status === 'paused' ||
+                                status === 'unregistered' ||
+                                initiatingId === contact.rowid
+                              }
+                              className="rounded-full bg-gray-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300"
+                            >
+                              {status === 'active'
+                                ? 'Active'
+                                : status === 'paused'
+                                ? 'Paused'
+                                : status === 'unregistered'
+                                ? 'Unregistered'
+                                : initiatingId === contact.rowid
+                                ? 'Sending...'
+                                : 'Initiate'}
+                            </button>
+                            {status !== 'active' && status !== 'unregistered' && (
+                              <button
+                                type="button"
+                                onClick={() => setContactStatus(contact.rowid, 'active')}
+                                disabled={statusUpdatingId === contact.rowid}
+                                className="rounded-full border border-emerald-200 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Set active
+                              </button>
+                            )}
+                            {status === 'active' && (
+                              <button
+                                type="button"
+                                onClick={() => setContactStatus(contact.rowid, 'paused')}
+                                disabled={statusUpdatingId === contact.rowid}
+                                className="rounded-full border border-orange-200 px-4 py-2 text-sm font-semibold text-orange-700 transition hover:border-orange-300 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Pause
+                              </button>
+                            )}
+                            {status !== 'unregistered' && (
+                              <button
+                                type="button"
+                                onClick={() => respondWithLlm(contact.rowid)}
+                                disabled={respondingId === contact.rowid}
+                                className="rounded-full border border-sky-200 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {respondingId === contact.rowid ? 'Responding...' : 'Respond'}
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => syncHistory(contact.rowid)}
+                              className="rounded-full border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:border-gray-300"
+                            >
+                              Sync history
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteContact(contact.rowid)}
+                              className="rounded-full border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-600 transition hover:border-rose-300 hover:bg-rose-50"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
                       )}
-                      {status === 'active' && (
-                        <button
-                          type="button"
-                          onClick={() => setContactStatus(contact.rowid, 'paused')}
-                          disabled={statusUpdatingId === contact.rowid}
-                          className="rounded-full border border-orange-200 px-4 py-2 text-sm font-semibold text-orange-700 transition hover:border-orange-300 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          Pause
-                        </button>
-                      )}
-                      {status !== 'unregistered' && (
-                        <button
-                          type="button"
-                          onClick={() => respondWithLlm(contact.rowid)}
-                          disabled={respondingId === contact.rowid}
-                          className="rounded-full border border-sky-200 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {respondingId === contact.rowid ? 'Responding...' : 'Respond'}
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => syncHistory(contact.rowid)}
-                        className="rounded-full border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:border-gray-300"
-                      >
-                        Sync history
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => deleteContact(contact.rowid)}
-                        className="rounded-full border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-600 transition hover:border-rose-300 hover:bg-rose-50"
-                      >
-                        Delete
-                      </button>
                     </div>
                   </div>
                 )
