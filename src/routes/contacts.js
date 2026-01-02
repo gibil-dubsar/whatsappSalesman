@@ -403,9 +403,9 @@ export function registerContactRoutes(app, { initialMessage, followupMessage, pr
                 res.status(404).json({ error: 'Chat not found.' });
                 return;
             }
-
+            const outline = typeof req.body?.outline === 'string' ? req.body.outline.trim() : '';
             const pending = snapshot.pending || [];
-            if (pending.length === 0) {
+            if (pending.length === 0 && !outline) {
                 res.json({ responded: 0, paused: false });
                 return;
             }
@@ -418,8 +418,8 @@ export function registerContactRoutes(app, { initialMessage, followupMessage, pr
                 .map((pendingMessage) => pendingMessage.content)
                 .filter(Boolean)
                 .join('\n');
-
-            if (!combinedContent) {
+            
+            if (!combinedContent && !outline ) {
                 res.json({ responded: 0, paused: false });
                 return;
             }
@@ -429,6 +429,7 @@ export function registerContactRoutes(app, { initialMessage, followupMessage, pr
                 message: combinedContent,
                 conversationHistory: history,
                 contactInfo,
+                outline,
             });
 
             if (result.action === 'reply' && (result.reply || result.media === 'include')) {

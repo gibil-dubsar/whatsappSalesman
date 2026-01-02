@@ -3,30 +3,70 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
 
 function extractJson(text) {
     if (!text) return null;
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
-    if (start === -1 || end === -1 || end <= start) {
-        return null;
+    let start = -1;
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+
+    for (let i = 0; i < text.length; i += 1) {
+        const ch = text[i];
+        if (start === -1) {
+            if (ch === '{') {
+                start = i;
+                depth = 1;
+            }
+            continue;
+        }
+
+        if (inString) {
+            if (escape) {
+                escape = false;
+            } else if (ch === '\\\\') {
+                escape = true;
+            } else if (ch === '"') {
+                inString = false;
+            }
+            continue;
+        }
+
+        if (ch === '"') {
+            inString = true;
+            continue;
+        }
+        if (ch === '{') {
+            depth += 1;
+        } else if (ch === '}') {
+            depth -= 1;
+            if (depth === 0) {
+                const slice = text.slice(start, i + 1);
+                try {
+                    return JSON.parse(slice);
+                } catch (err) {
+                    start = -1;
+                    depth = 0;
+                    inString = false;
+                    escape = false;
+                }
+            }
+        }
     }
-    const slice = text.slice(start, end + 1);
-    try {
-        return JSON.parse(slice);
-    } catch (err) {
-        return null;
-    }
+    return null;
 }
 
-function buildPrompt(propertyContext, message, conversationHistory, contactInfo) {
+function buildPrompt(propertyContext, message, conversationHistory, contactInfo, outline) {
     const contextJson = JSON.stringify(propertyContext);
     const historyText = conversationHistory ? conversationHistory : '(none)';
     const contactJson = contactInfo ? JSON.stringify(contactInfo) : '{}';
+    const outlineText = outline ? String(outline) : '';
     return [
         'You are a WhatsApp assistant aiming to convince a real-estate/property agent or broker to sell a specific property.',
         'Your goal is provide them with factual information that they may need to adversite the property and introduce the property to potential buyers.',
+        'If they mention advertising, we want them to focus on leveraging your network and direct client outreach, as we have already advertised extensively online.',
         'Use ONLY the property context JSON below to answer questions.',
         'Use the contact info to identify who you are speaking with.',
         'If you cannot confidently determine a name, address them in a generic fashion such as "Sir/Madam".',
-        'If the user gives a simple acknowledgement or confirmation with no new question, you may respond with:',
+        'If an outline is provided, follow it and craft a helpful response aligned with the outline.',
+        'If an outline is not provided and the user gives a simple acknowledgement or confirmation with no new question, you may respond with:',
         '{"action":"ack","ack":"seen"} or {"action":"ack","ack":"thumbs_up"}',
         'If the user asks for information not present in the context, or the question is unclear, respond with:',
         '{"action":"pause","reply":"","media":"none"}',
@@ -34,6 +74,10 @@ function buildPrompt(propertyContext, message, conversationHistory, contactInfo)
         '{"action":"reply","reply":"...","media":"include"}',
         'this will trigger the media inclusion in the response. Otherwise respond with JSON:',
         '{"action":"reply","reply":"...","media":"none"}',
+        'If the history includes [media:image] or similar, you should NOT request to send photos again unless explicitly asked.',
+        'History includes events like "me: [media:image]" or "them: [call:log]"; treat them as context, not questions.',
+        'Return exactly ONE JSON object with ONLY these keys: action, reply, media, ack.',
+        'Do not add any extra keys, arrays, or text outside the JSON object.',
         'Do not add any extra text outside the JSON.',
         'At the beginning of the conversation, if they want details, send a structured introduction (including the location link) of the property using the context information.',
         'Don\'t mention document details (COC, suvery plan etc.) until the other party has potential buyers who have shown serious interest.',
@@ -47,22 +91,24 @@ function buildPrompt(propertyContext, message, conversationHistory, contactInfo)
         'Recent conversation history:',
         historyText,
         '',
+        outlineText ? `Response outline: ${outlineText}` : null,
+        outlineText ? '' : null,
         `Contact info JSON: ${contactJson}`,
         '',
         `Property context JSON: ${contextJson}`,
         '',
         `User message: ${message}`
-    ].join('\n');
+    ].filter(Boolean).join('\n');
 }
 
-export async function generateGeminiResponse({ propertyContext, message, conversationHistory, contactInfo }) {
+export async function generateGeminiResponse({ propertyContext, message, conversationHistory, contactInfo, outline }) {
     if (!GEMINI_API_KEY) {
         console.error('Missing Gemini API key');
         return { action: 'pause', reply: '', media: 'none', reason: 'missing_api_key' };
     }
     
 
-    const prompt = buildPrompt(propertyContext, message, conversationHistory, contactInfo);
+    const prompt = buildPrompt(propertyContext, message, conversationHistory, contactInfo, outline);
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
     const body = {
         contents: [

@@ -123,9 +123,13 @@ function getMessageContent(message) {
     if (body) {
         return body;
     }
-    if (message.hasMedia) {
-        const mediaType = message.type ? String(message.type) : 'media';
-        return `User sent media: ${mediaType}`;
+    const type = message.type ? String(message.type) : '';
+    if (message.hasMedia || ['image', 'video', 'audio', 'ptt', 'document', 'sticker', 'album', 'location', 'vcard', 'multi_vcard'].includes(type)) {
+        const mediaType = type || 'media';
+        return `User sent [media:${mediaType}]`;
+    }
+    if (type === 'call_log') {
+        return 'User sent [call:log]';
     }
     return '';
 }
@@ -135,10 +139,14 @@ function formatMessageLine(message) {
     const rawBody = typeof message.body === 'string' ? message.body : '';
     const body = rawBody.trim();
     if (!body) {
-        if (message.hasMedia) {
-            const mediaType = message.type ? String(message.type) : 'media';
+        const type = message.type ? String(message.type) : '';
+        if (message.hasMedia || ['image', 'video', 'audio', 'ptt', 'document', 'sticker', 'album', 'location', 'vcard', 'multi_vcard'].includes(type)) {
+            const mediaType = type || 'media';
             const label = `media:${mediaType}`;
             return message.fromMe ? `me: [${label}]` : `them: [${label}]`;
+        }
+        if (type === 'call_log') {
+            return message.fromMe ? 'me: [call:log]' : 'them: [call:log]';
         }
         return null;
     }
