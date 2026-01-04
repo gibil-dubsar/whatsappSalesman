@@ -41,6 +41,7 @@ function App() {
   const [respondWithId, setRespondWithId] = useState(null)
   const [toast, setToast] = useState(null)
   const formRef = useRef(null)
+  const scrollTargetRef = useRef(null)
   const [activeTab, setActiveTab] = useState('contacts')
   const [whatsappStatus, setWhatsappStatus] = useState('unknown')
   const [qrCode, setQrCode] = useState('')
@@ -54,6 +55,15 @@ function App() {
     const interval = window.setInterval(loadWhatsappStatus, 5000)
     return () => window.clearInterval(interval)
   }, [])
+
+  useEffect(() => {
+    const targetRowId = scrollTargetRef.current
+    if (!targetRowId) return
+    scrollTargetRef.current = null
+    const row = document.getElementById(`contact-${targetRowId}`)
+    if (!row) return
+    row.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, [contacts])
 
   const stats = useMemo(() => {
     const total = contacts.length
@@ -133,6 +143,7 @@ function App() {
     try {
       await fetchJson(`/api/contacts/${rowid}/initiate`, { method: 'POST' })
       showToast('Conversation initiated.')
+      scrollTargetRef.current = rowid
       loadContacts()
     } catch (err) {
       showToast(err.message, 'error')
@@ -157,6 +168,7 @@ function App() {
     try {
       await fetchJson(`/api/contacts/${rowid}`, { method: 'DELETE' })
       showToast('Contact deleted.')
+      scrollTargetRef.current = rowid
       loadContacts()
     } catch (err) {
       showToast(err.message, 'error')
@@ -172,6 +184,7 @@ function App() {
         body: JSON.stringify({ status }),
       })
       showToast(`Status set to ${status}.`)
+      scrollTargetRef.current = rowid
       loadContacts()
     } catch (err) {
       showToast(err.message, 'error')
@@ -192,6 +205,7 @@ function App() {
         showToast('No unreplied messages found.')
       }
       if (data.paused) {
+        scrollTargetRef.current = rowid
         loadContacts()
       }
     } catch (err) {
@@ -218,6 +232,7 @@ function App() {
         showToast('No unreplied messages found.')
       }
       if (data.paused) {
+        scrollTargetRef.current = rowid
         loadContacts()
       }
     } catch (err) {
@@ -488,6 +503,7 @@ function App() {
                 return (
                   <div
                     key={contact.rowid}
+                    id={`contact-${contact.rowid}`}
                     className="flex flex-col gap-4 rounded-2xl border border-gray-200 bg-gray-50/60 p-4 md:flex-row md:items-center md:justify-between"
                   >
                     <div className="flex-1">

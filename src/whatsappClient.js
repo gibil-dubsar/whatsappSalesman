@@ -114,6 +114,13 @@ function logEvent(event, args) {
     console.log(`[WA_EVENT] ${event}${suffix}`);
 }
 
+function shouldReinitForError(err) {
+    const message = err?.message || String(err || '');
+    return message.includes('detached Frame')
+        || message.includes('Execution context was destroyed')
+        || message.includes('Target closed');
+}
+
 function getMessageContent(message) {
     if (!message || typeof message !== 'object') {
         return '';
@@ -442,7 +449,7 @@ export async function fetchChatMessages(chatId, options = {}, { clean = false } 
     if (!client) {
         throw new Error('WhatsApp client not initialized.');
     }
-    const chat = await client.getChatById(chatId);
+    const chat = await getChatById(chatId);
     if (!chat) {
         return null;
     }
@@ -489,7 +496,7 @@ export async function getUnrepliedMessagesSnapshot(chatId, { limit = 250 } = {})
     if (!client) {
         throw new Error('WhatsApp client not initialized.');
     }
-    const chat = await client.getChatById(chatId);
+    const chat = await getChatById(chatId);
     if (!chat) {
         return null;
     }
@@ -540,5 +547,12 @@ export async function getChatById(chatId) {
     if (!client) {
         throw new Error('WhatsApp client not initialized.');
     }
-    return client.getChatById(chatId);
+    try {
+        return await client.getChatById(chatId);
+    } catch (err) {
+        if (shouldReinitForError(err)) {
+            scheduleReinit('puppeteer_frame');
+        }
+        throw err;
+    }
 }
